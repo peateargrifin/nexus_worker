@@ -13,11 +13,13 @@ import (
 func GetDiagnosis() *DiagnosisInfo {
 	var anomaly store.Event
 	err := store.DB.QueryRow(`
-		SELECT id, ts, entity_type, entity_id, action, reason 
-		FROM events 
-		WHERE entity_type = 'worker' AND action IN ('killed', 'budget_exhausted', 'panicked') 
-		AND ts >= datetime('now', '-5 minutes')
-		ORDER BY ts DESC LIMIT 1
+		SELECT e.id, e.ts, e.entity_type, e.entity_id, e.action, e.reason 
+		FROM events e
+		JOIN workers w ON w.id = e.entity_id
+		WHERE e.entity_type = 'worker' AND e.action IN ('killed', 'budget_exhausted', 'panicked') 
+		AND w.status IN ('dead', 'restarting')
+		AND e.ts >= datetime('now', '-5 minutes')
+		ORDER BY e.ts DESC LIMIT 1
 	`).Scan(&anomaly.ID, &anomaly.Ts, &anomaly.EntityType, &anomaly.EntityID, &anomaly.Action, &anomaly.Reason)
 
 	if err != nil {

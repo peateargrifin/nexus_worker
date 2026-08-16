@@ -121,6 +121,9 @@ func (s *Supervisor) runWorker(ctx context.Context, workerID string) {
 		return s.chaosSettings[workerID]
 	}
 
+	ticker := time.NewTicker(1 * time.Second)
+	defer ticker.Stop()
+
 	for {
 		if chaosMode() == "crash-loop" {
 			panic("chaos: crash-loop")
@@ -147,6 +150,9 @@ func (s *Supervisor) runWorker(ctx context.Context, workerID string) {
 				log.Printf("Worker %s earned its restart budget back", workerID)
 				_ = store.CreateEvent("worker", workerID, "budget_recovered", nil, nil)
 			}
+		case <-ticker.C:
+			// Wake up periodically to evaluate chaos state at the top of the loop
+			continue
 		case item := <-s.workChan:
 			assigned, err := store.AssignWorkItem(item.ID, workerID)
 			if err != nil || !assigned {
@@ -197,6 +203,10 @@ func recoverAssignedWork(workerID string) {
 }
 
 func (s *Supervisor) ReviveWorker(workerID string) error {
+	s.mu.Lock()
+	delete(s.chaosSettings, workerID)
+	s.mu.Unlock()
+
 	worker, err := store.GetWorker(workerID)
 	if err != nil {
 		return err

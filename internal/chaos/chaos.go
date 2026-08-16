@@ -40,9 +40,12 @@ func HandleDrainerDown(w http.ResponseWriter, r *http.Request) {
 }
 
 func HandleDrift(w http.ResponseWriter, r *http.Request) {
-	key := r.PathValue("key")
-	// write a drifted value directly to cache bypassing normal route
-	_ = store.UpsertCacheEntry(key, "drifted_status", 60)
+	// Pick any existing work item to demonstrate drift
+	var key string
+	err := store.DB.QueryRow("SELECT id FROM work_items LIMIT 1").Scan(&key)
+	if err == nil && key != "" {
+		_ = store.UpsertCacheEntry(key, "drifted_status", 60)
+	}
 	w.WriteHeader(http.StatusOK)
 }
 

@@ -61,8 +61,11 @@ func StartReconciler(ctx context.Context) {
 
 			for _, l := range toLog {
 				parts := strings.SplitN(l, "|", 2)
+				key := parts[0]
 				reason := parts[1]
-				_ = store.CreateEvent("cache", parts[0], "disagreement", &reason, nil)
+				_ = store.CreateEvent("cache", key, "disagreement", &reason, nil)
+				// Auto-heal the cache by purging the corrupted entry
+				_, _ = store.DB.Exec("DELETE FROM cache_entries WHERE key = ?", key)
 			}
 
 			previousMismatches = currentMismatches
