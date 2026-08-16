@@ -16,6 +16,7 @@ func GetDiagnosisString() string {
 		SELECT id, ts, entity_type, entity_id, action, reason 
 		FROM events 
 		WHERE entity_type = 'worker' AND action IN ('killed', 'budget_exhausted', 'panicked') 
+		AND ts >= datetime('now', '-5 minutes')
 		ORDER BY ts DESC LIMIT 1
 	`).Scan(&anomaly.ID, &anomaly.Ts, &anomaly.EntityType, &anomaly.EntityID, &anomaly.Action, &anomaly.Reason)
 
