@@ -11,7 +11,7 @@ func CreateEvent(entityType, entityID, action string, reason *string, causedByEv
 			JOIN events e ON e.entity_type = 'release' AND e.entity_id = r.id AND e.action = 'pushed'
 			WHERE r.status = 'watching' AND r.watch_until > ?
 			ORDER BY r.started_at DESC LIMIT 1
-		`, time.Now().UTC()).Scan(&activeReleaseEventID)
+		`, time.Now()).Scan(&activeReleaseEventID)
 		if err == nil {
 			causedByEventID = &activeReleaseEventID
 		}

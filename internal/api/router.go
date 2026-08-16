@@ -24,6 +24,8 @@ func NewRouter() *http.ServeMux {
 	mux.HandleFunc("GET /cache/{key}", handleGetCache)
 	mux.HandleFunc("GET /diagnosis", handleGetDiagnosis)
 	mux.HandleFunc("GET /status", handleGetStatus)
+	mux.HandleFunc("POST /work/{id}/claim", handleClaimWork)
+	mux.HandleFunc("GET /beliefs", handleGetBeliefs)
 
 	mux.HandleFunc("GET /", func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/" {
@@ -93,6 +95,60 @@ func handleReplayWork(w http.ResponseWriter, r *http.Request) {
 
 	_ = store.CreateEvent("work_item", id, "replay_queued", nil, nil)
 	w.WriteHeader(http.StatusOK)
+}
+
+func handleClaimWork(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	var body struct {
+		WorkerID string `json:"worker_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	claimed, err := store.AssignWorkItem(id, body.WorkerID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	if !claimed {
+		http.Error(w, "conflict", http.StatusConflict)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+}
+
+func handleGetBeliefs(w http.ResponseWriter, r *http.Request) {
+	beliefs := map[string]any{
+		"dependency_down": chaos.DependencyDown,
+		"drainer_down":    dispatch.DrainerDown,
+	}
+
+	rel, _ := store.GetActiveRelease()
+	beliefs["active_release"] = rel
+
+	workers, _ := store.DB.Query("SELECT id, status, version, restart_count FROM workers")
+	var workerList []map[string]any
+	if workers != nil {
+		for workers.Next() {
+			var id, status, version string
+			var count int
+			workers.Scan(&id, &status, &version, &count)
+			workerList = append(workerList, map[string]any{
+				"id":            id,
+				"status":        status,
+				"version":       version,
+				"restart_count": count,
+			})
+		}
+		workers.Close()
+	}
+	beliefs["workers"] = workerList
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(beliefs)
 }
 
 func handleGetEvents(w http.ResponseWriter, r *http.Request) {
