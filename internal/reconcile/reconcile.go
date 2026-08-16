@@ -23,10 +23,10 @@ func StartReconciler(ctx context.Context) {
 			currentMismatches := make(map[string]bool)
 
 			rows, err := store.DB.Query(`
-				SELECT c.key, c.value, w.status 
+				SELECT c.key, c.value, w.status, c.cached_at, w.updated_at
 				FROM cache_entries c 
 				JOIN work_items w ON c.key = w.id 
-				WHERE c.value != w.status
+				WHERE c.value != w.status OR w.updated_at > datetime(c.cached_at, '+60 seconds')
 			`)
 			if err != nil {
 				log.Printf("Reconciler error querying mismatches: %v", err)
@@ -36,14 +36,21 @@ func StartReconciler(ctx context.Context) {
 			var toLog []string
 			for rows.Next() {
 				var key, cacheVal, dbVal string
-				if err := rows.Scan(&key, &cacheVal, &dbVal); err != nil {
+				var cachedAt, updatedAt time.Time
+				if err := rows.Scan(&key, &cacheVal, &dbVal, &cachedAt, &updatedAt); err != nil {
 					continue
 				}
 				currentMismatches[key] = true
 
 				if previousMismatches[key] {
 					log.Printf("[RECONCILE] key %s mismatched (tick 2 of 2) -> firing disagreement event", key)
-					toLog = append(toLog, key+"|cache="+cacheVal+" != db="+dbVal)
+					var reason string
+					if cacheVal != dbVal {
+						reason = "cache=" + cacheVal + " != db=" + dbVal
+					} else {
+						reason = "cache value matches but is too old relative to truth"
+					}
+					toLog = append(toLog, key+"|"+reason)
 					// Remove from current so it doesn't log every single tick if it never resolves
 					delete(currentMismatches, key)
 				} else {

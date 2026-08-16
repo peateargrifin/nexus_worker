@@ -58,9 +58,15 @@ func (s *Supervisor) spawnWorker(workerID string) {
 	worker := &store.Worker{
 		ID:                 workerID,
 		Status:             "starting",
+		Version:            "v1.0",
 		RestartCount:       0,
 		RestartWindowStart: &now,
 	}
+
+	if rel, _ := store.GetActiveRelease(); rel != nil {
+		worker.Version = rel.Version
+	}
+
 	// Fetch previous state to preserve restart budgets (R-04)
 	if existing, err := store.GetWorker(workerID); err == nil {
 		worker.RestartCount = existing.RestartCount
@@ -89,6 +95,8 @@ func (s *Supervisor) runWorker(ctx context.Context, workerID string) {
 			log.Printf("Worker %s panicked: %v", workerID, r)
 			reason := fmt.Sprintf("%v", r)
 			_ = store.CreateEvent("worker", workerID, "panicked", &reason, nil)
+			
+			recoverAssignedWork(workerID)
 			
 			// Restart logic
 			time.AfterFunc(1*time.Second, func() {
@@ -129,6 +137,7 @@ func (s *Supervisor) runWorker(ctx context.Context, workerID string) {
 			worker.Status = "dead"
 			_ = store.UpsertWorker(worker)
 			_ = store.CreateEvent("worker", workerID, "killed", nil, nil)
+			recoverAssignedWork(workerID)
 			return
 		case <-budgetResetTimer.C:
 			// Continuous 30s of health achieved! Earn recovered.
@@ -147,7 +156,11 @@ func (s *Supervisor) runWorker(ctx context.Context, workerID string) {
 			log.Printf("Worker %s processing item %s", workerID, item.ID)
 
 			// Simulate work
-			time.Sleep(500 * time.Millisecond)
+			select {
+			case <-time.After(500 * time.Millisecond):
+			case <-ctx.Done():
+				continue // skip completion, loop will catch ctx.Done()
+			}
 
 			if chaosMode() == "fail-work" {
 				dispatch.RetryOrDeadLetter(item, "chaos: fail-work")
@@ -168,6 +181,18 @@ func (s *Supervisor) KillWorker(workerID string) {
 	if cancel, exists := s.workers[workerID]; exists {
 		cancel()
 		delete(s.workers, workerID)
+	}
+}
+
+func recoverAssignedWork(workerID string) {
+	items, err := store.GetAssignedWorkItems(workerID)
+	if err != nil {
+		log.Printf("Failed to recover items for worker %s: %v", workerID, err)
+		return
+	}
+	for _, it := range items {
+		log.Printf("Recovering work item %s from dead worker %s", it.ID, workerID)
+		dispatch.RetryOrDeadLetter(&it, "worker_died")
 	}
 }
 

@@ -133,7 +133,7 @@
     <div class="card">
       <h2>Workers</h2>
       <table>
-        <thead><tr><th>Worker</th><th>Restarts</th><th>Last healthy</th></tr></thead>
+        <thead><tr><th>Worker</th><th>Version</th><th>Restarts</th><th>Last healthy</th></tr></thead>
         <tbody id="workers-body"></tbody>
       </table>
     </div>
@@ -177,9 +177,10 @@ function render(status) {
   wBody.innerHTML = (status.workers || []).map(w => `
     <tr>
       <td><span class="dot ${w.status}"></span>${w.id}</td>
+      <td>${w.version}</td>
       <td>${w.restart_count}</td>
       <td>${w.last_healthy_at ? timeAgo(w.last_healthy_at) : '-'}</td>
-    </tr>`).join('') || '<tr><td class="empty" colspan="3">No workers reporting</td></tr>';
+    </tr>`).join('') || '<tr><td class="empty" colspan="4">No workers reporting</td></tr>';
 
   const dlBody = document.getElementById('dl-body');
   dlBody.innerHTML = (status.dead_letters || []).map(d => `

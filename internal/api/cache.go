@@ -20,6 +20,10 @@ func handleGetCache(w http.ResponseWriter, r *http.Request) {
 		}
 		
 		age := int(time.Since(entry.CachedAt).Seconds())
+		if age > entry.MaxAgeSeconds {
+			http.Error(w, "dependency down and cache expired", http.StatusServiceUnavailable)
+			return
+		}
 		
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]any{

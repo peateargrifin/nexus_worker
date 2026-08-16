@@ -7,7 +7,7 @@ import (
 	"time"
 )
 
-// StartDrainer continuously drains dead-lettered items back to active dispatch
+// StartDrainer continuously drains replay_queued items back to active dispatch
 // at a maximum rate of 20 items per second (R-11).
 var DrainerDown bool
 
@@ -27,7 +27,7 @@ func StartDrainer(ctx context.Context) {
 				UPDATE work_items 
 				SET status = 'pending', attempt_count = 0, assigned_worker = NULL, dead_letter_reason = NULL, updated_at = ?
 				WHERE id IN (
-					SELECT id FROM work_items WHERE status = 'dead_letter' LIMIT 1
+					SELECT id FROM work_items WHERE status = 'replay_queued' ORDER BY updated_at ASC LIMIT 1
 				)
 			`, time.Now())
 			if err != nil {
@@ -40,7 +40,7 @@ func StartDrainer(ctx context.Context) {
 				// Backoff slightly to avoid slamming the DB when there's no backlog
 				time.Sleep(500 * time.Millisecond)
 			} else {
-			    log.Printf("[DRAIN] %s: Drained 1 item from dead_letter to pending", time.Now().Format("15:04:05.000000"))
+			    log.Printf("[DRAIN] %s: Drained 1 item from replay_queued to pending", time.Now().Format("15:04:05.000000"))
 			}
 		}
 	}

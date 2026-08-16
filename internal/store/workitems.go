@@ -59,6 +59,24 @@ func GetPendingWorkItems(limit int) ([]WorkItem, error) {
 	return items, nil
 }
 
+func GetAssignedWorkItems(workerID string) ([]WorkItem, error) {
+	rows, err := DB.Query("SELECT id, type, body, status, attempt_count, max_attempts, next_retry_at, idempotency_token FROM work_items WHERE status = 'assigned' AND assigned_worker = ?", workerID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var items []WorkItem
+	for rows.Next() {
+		var item WorkItem
+		if err := rows.Scan(&item.ID, &item.Type, &item.Body, &item.Status, &item.AttemptCount, &item.MaxAttempts, &item.NextRetryAt, &item.IdempotencyToken); err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	return items, nil
+}
+
 func AssignWorkItem(id string, workerID string) (bool, error) {
 	res, err := DB.Exec("UPDATE work_items SET status = 'assigned', assigned_worker = ?, updated_at = ? WHERE id = ? AND status = 'pending'", workerID, time.Now(), id)
 	if err != nil {

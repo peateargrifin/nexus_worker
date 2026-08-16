@@ -16,6 +16,7 @@ func NewRouter() *http.ServeMux {
 
 	// Core endpoints
 	mux.HandleFunc("POST /work", handlePostWork)
+	mux.HandleFunc("POST /work/{id}/replay", handleReplayWork)
 	mux.HandleFunc("GET /events", handleGetEvents)
 	mux.HandleFunc("POST /releases", handlePostRelease)
 	mux.HandleFunc("POST /releases/{id}/rollback", handleRollbackRelease)
@@ -75,6 +76,23 @@ func handlePostWork(w http.ResponseWriter, r *http.Request) {
 
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(map[string]string{"status": "accepted"})
+}
+
+func handleReplayWork(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	res, err := store.DB.Exec("UPDATE work_items SET status = 'replay_queued', updated_at = ? WHERE id = ? AND status = 'dead_letter'", time.Now(), id)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	affected, _ := res.RowsAffected()
+	if affected == 0 {
+		http.Error(w, "Item not found or not dead_lettered", http.StatusBadRequest)
+		return
+	}
+
+	_ = store.CreateEvent("work_item", id, "replay_queued", nil, nil)
+	w.WriteHeader(http.StatusOK)
 }
 
 func handleGetEvents(w http.ResponseWriter, r *http.Request) {

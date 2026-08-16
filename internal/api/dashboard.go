@@ -39,6 +39,14 @@ func GetDiagnosisString() string {
 		actionStr = "crash-looping"
 	}
 
+	if err != nil {
+		return fmt.Sprintf("Worker %s has been %s since %s. No recent release found.",
+			anomaly.EntityID,
+			actionStr,
+			anomaly.Ts.Format("15:04:05"),
+		)
+	}
+
 	return fmt.Sprintf("Worker %s has been %s since %s, %d seconds after release %s went out.",
 		anomaly.EntityID,
 		actionStr,
@@ -82,6 +90,7 @@ type BacklogInfo struct {
 type WorkerInfo struct {
 	ID             string     `json:"id"`
 	Status         string     `json:"status"`
+	Version        string     `json:"version"`
 	RestartCount   int        `json:"restart_count"`
 	LastHealthyAt  *time.Time `json:"last_healthy_at"`
 }
@@ -111,11 +120,11 @@ func handleGetStatus(w http.ResponseWriter, r *http.Request) {
 	_ = store.DB.QueryRow("SELECT COUNT(*) FROM work_items WHERE status = 'dead_letter'").Scan(&status.Backlog.DeadLetterCount)
 
 	// 2. Workers
-	rowsW, _ := store.DB.Query("SELECT id, status, restart_count, last_healthy_at FROM workers ORDER BY id ASC")
+	rowsW, _ := store.DB.Query("SELECT id, status, version, restart_count, last_healthy_at FROM workers ORDER BY id ASC")
 	if rowsW != nil {
 		for rowsW.Next() {
 			var wi WorkerInfo
-			_ = rowsW.Scan(&wi.ID, &wi.Status, &wi.RestartCount, &wi.LastHealthyAt)
+			_ = rowsW.Scan(&wi.ID, &wi.Status, &wi.Version, &wi.RestartCount, &wi.LastHealthyAt)
 			status.Workers = append(status.Workers, wi)
 		}
 		rowsW.Close()

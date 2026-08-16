@@ -1,3 +1,4 @@
-2026/08/16 14:19:44 Starting platform on :8080
-2026/08/16 14:19:48 Worker w-2 processing item t-r02-fast
-2026/08/16 14:19:48 Worker w-1 processing item t-r02
+2026/08/16 14:56:47 Starting platform on :8080
+2026/08/16 14:56:51 Worker w-1 processing item t-r01-death
+2026/08/16 14:56:51 Worker w-1 context cancelled
+2026/08/16 14:56:51 Recovering work item t-r01-death from dead worker w-1
