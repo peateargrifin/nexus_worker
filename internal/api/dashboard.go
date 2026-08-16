@@ -45,14 +45,14 @@ func GetDiagnosisString() string {
 		return fmt.Sprintf("Worker %s has been %s since %s. No recent release found.",
 			anomaly.EntityID,
 			actionStr,
-			anomaly.Ts.Format("15:04:05"),
+			anomaly.Ts.Local().Format("15:04:05"),
 		)
 	}
 
 	return fmt.Sprintf("Worker %s has been %s since %s, %d seconds after release %s went out.",
 		anomaly.EntityID,
 		actionStr,
-		anomaly.Ts.Format("15:04:05"),
+		anomaly.Ts.Local().Format("15:04:05"),
 		int(anomaly.Ts.Sub(rel.Ts).Seconds()),
 		rel.EntityID,
 	)
