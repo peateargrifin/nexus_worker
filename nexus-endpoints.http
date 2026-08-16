@@ -1,0 +1,181 @@
+### NEXUS endpoint collection — R-01 to R-12
+### Requires the VS Code "REST Client" extension (humao.rest-client)
+### Run platform.exe first, then click "Send Request" above any block below
+
+@baseUrl = http://localhost:8080
+
+### ============================================================
+### R-01 / R-02 / R-03 — accept, persist, dead-letter, dedup
+### ============================================================
+
+### Submit a work item
+POST {{baseUrl}}/work
+Content-Type: application/json
+
+{
+  "id": "manual-1",
+  "type": "email",
+  "body": "hello",
+  "idempotency_token": "manual-tok-1"
+}
+
+### Submit the SAME token again — should return duplicate_suppressed (submission-side)
+POST {{baseUrl}}/work
+Content-Type: application/json
+
+{
+  "id": "manual-1b",
+  "type": "email",
+  "body": "hello",
+  "idempotency_token": "manual-tok-1"
+}
+
+### Simulate the platform re-delivering an already-done item (R-03 delivery-side dedup)
+POST {{baseUrl}}/chaos/duplicate
+
+### Force a worker to fail this item until it exhausts max_attempts (R-02 dead-letter)
+POST {{baseUrl}}/work
+Content-Type: application/json
+
+{
+  "id": "manual-dl",
+  "type": "email",
+  "body": "fail me",
+  "idempotency_token": "manual-tok-dl",
+  "max_attempts": 1
+}
+
+###
+POST {{baseUrl}}/chaos/fail-work/w-1
+
+### Check it landed in dead_letter
+GET {{baseUrl}}/events?entity_type=work_item&entity_id=manual-dl
+
+
+### ============================================================
+### R-01 / R-04 — worker kill, crash-loop, single crash, revive
+### ============================================================
+
+### Kill a worker mid-processing
+POST {{baseUrl}}/chaos/kill-worker/w-1
+
+### Crash-loop a worker (should exhaust restart budget and go dead)
+POST {{baseUrl}}/chaos/crash-loop/w-1
+
+### Single crash (use this + wait 31s, then check restart_count resets to 0)
+POST {{baseUrl}}/chaos/crash-once/w-1
+
+### Revive a dead worker without restarting the platform
+POST {{baseUrl}}/workers/w-2/revive
+
+
+### ============================================================
+### R-05 — query the past
+### ============================================================
+
+### All events for one work item
+GET {{baseUrl}}/events?entity_type=work_item&entity_id=manual-1
+
+### All events for a worker
+GET {{baseUrl}}/events?entity_type=worker&entity_id=w-1
+
+### Events since a timestamp
+GET {{baseUrl}}/events?since=2026-08-16T00:00:00Z
+
+
+### ============================================================
+### R-06 — releases, undo
+### ============================================================
+
+### Valid release — requires previous_version
+POST {{baseUrl}}/releases
+Content-Type: application/json
+
+{
+  "version": "v2.0",
+  "previous_version": "v1.0"
+}
+
+### Invalid release — missing previous_version, should be rejected with 400
+POST {{baseUrl}}/chaos/bad-release
+
+### Rollback — replace {id} with the id returned above
+POST {{baseUrl}}/releases/REPLACE_WITH_RELEASE_ID/rollback
+
+
+### ============================================================
+### R-07 — release linked to effects
+### ============================================================
+
+### After creating a release above (still in its watch window), submit work
+### then check the event's caused_by_event_id points at the release's start event
+POST {{baseUrl}}/work
+Content-Type: application/json
+
+{
+  "id": "manual-r07",
+  "type": "email",
+  "body": "during release",
+  "idempotency_token": "manual-tok-r07"
+}
+
+###
+GET {{baseUrl}}/events?entity_type=work_item&entity_id=manual-r07
+
+
+### ============================================================
+### R-08 — cache disagreement detection
+### ============================================================
+
+### Read the cache normally first
+GET {{baseUrl}}/cache/manual-1
+
+### Inject drift
+POST {{baseUrl}}/chaos/drift/manual-1
+
+### Wait for two reconcile ticks, then check for the disagreement event
+GET {{baseUrl}}/events?entity_type=cache&entity_id=manual-1
+
+
+### ============================================================
+### R-09 / R-10 — cache age + honest degradation
+### ============================================================
+
+### Normal read — should show stale:false, age_seconds:0-ish
+GET {{baseUrl}}/cache/manual-1
+
+### Toggle the simulated dependency off
+POST {{baseUrl}}/chaos/dependency-down
+
+### Read again — should show stale:true with a real age_seconds, never an error
+GET {{baseUrl}}/cache/manual-1
+
+### Toggle it back on when done testing
+POST {{baseUrl}}/chaos/dependency-down
+
+
+### ============================================================
+### R-11 — rate-limited recovery
+### ============================================================
+
+### Force several items into dead_letter first (repeat the R-02 block above with
+### different ids), then watch platform.log for ~50ms-spaced "Drained" lines
+### as the token bucket drains them back to pending automatically.
+
+
+### ============================================================
+### R-12 — 90-second diagnosis
+### ============================================================
+
+### Crash a worker, then immediately check the diagnosis
+POST {{baseUrl}}/chaos/crash-once/w-3
+
+###
+GET {{baseUrl}}/diagnosis
+
+### ============================================================
+### Dashboard 
+### ============================================================
+
+### Dashboard Aggregation Endpoint
+GET {{baseUrl}}/status

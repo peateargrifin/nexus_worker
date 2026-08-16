@@ -1,0 +1,6 @@
+platform.exe
+nexus.db
+nexus.db-shm
+nexus.db-wal
+*.log
+test_output.txt

@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<!--
+  NEXUS operator dashboard — static, no build step, served by net/http.
+  Polls GET /status every 1.5s. Expected response shape:
+
+  {
+    "diagnosis": { "text": "...", "severity": "ok" | "warning" | "critical" },
+    "backlog": { "pending": 12, "oldest_age_seconds": 340, "dead_letter_count": 2 },
+    "workers": [
+      { "id": "w-1", "status": "running", "restart_count": 2, "last_healthy_at": "2026-08-16T08:49:00Z" }
+    ],
+    "dead_letters": [
+      { "id": "t-1", "type": "email", "reason": "chaos: fail-work", "since": "2026-08-16T08:49:48Z" }
+    ],
+    "recent_events": [
+      { "id": 19, "ts": "...", "entity_type": "cache", "entity_id": "t-r08",
+        "action": "disagreement", "reason": "...", "caused_by_event_id": null }
+    ]
+  }
+
+  If "diagnosis" is null or severity is "ok", the banner reads "All systems normal."
+  caused_by_event_id present -> solid connector in the timeline (R-13 confirmed link).
+  caused_by_event_id null    -> dotted connector (merely adjacent in time, not confirmed).
+-->
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>NEXUS operator view</title>
+<style>
+  :root {
+    --bg: #0b0e11;
+    --card: #14181d;
+    --border: #232830;
+    --text: #e7e9ea;
+    --text-dim: #8b92a0;
+    --mono: ui-monospace, "SF Mono", Consolas, monospace;
+    --sans: system-ui, -apple-system, sans-serif;
+    --ok: #3dd68c;
+    --warn: #f2b84b;
+    --crit: #f2545b;
+    --neutral: #6b7280;
+  }
+  * { box-sizing: border-box; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--sans);
+    margin: 0;
+    padding: 24px;
+  }
+  h1 {
+    font-size: 15px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--text-dim);
+    margin: 0 0 16px;
+  }
+  .banner {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-left: 4px solid var(--neutral);
+    border-radius: 6px;
+    padding: 18px 20px;
+    margin-bottom: 20px;
+    font-family: var(--mono);
+    font-size: 16px;
+    line-height: 1.5;
+  }
+  .banner.ok { border-left-color: var(--ok); }
+  .banner.warning { border-left-color: var(--warn); }
+  .banner.critical { border-left-color: var(--crit); }
+  .banner .ts { color: var(--text-dim); font-size: 12px; display: block; margin-bottom: 4px; }
+  .grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+    margin-bottom: 16px;
+  }
+  .card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 16px 18px;
+  }
+  .card h2 {
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--text-dim);
+    margin: 0 0 12px;
+  }
+  .stat-row { display: flex; justify-content: space-between; padding: 4px 0; font-family: var(--mono); font-size: 13px; }
+  .stat-row .k { color: var(--text-dim); }
+  table { width: 100%; border-collapse: collapse; font-family: var(--mono); font-size: 13px; }
+  th { text-align: left; color: var(--text-dim); font-weight: 500; padding: 4px 8px 8px 0; font-size: 11px; text-transform: uppercase; letter-spacing: 0.03em; }
+  td { padding: 6px 8px 6px 0; border-top: 1px solid var(--border); }
+  .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; }
+  .dot.running { background: var(--ok); }
+  .dot.restarting { background: var(--warn); }
+  .dot.dead { background: var(--crit); }
+  .dot.starting { background: var(--neutral); }
+  .events { max-height: 320px; overflow-y: auto; }
+  .event { display: flex; gap: 10px; padding: 6px 0; font-family: var(--mono); font-size: 12px; border-top: 1px solid var(--border); }
+  .event:first-child { border-top: none; }
+  .event .connector { width: 14px; text-align: center; color: var(--text-dim); }
+  .event .connector.solid::before { content: "\2502"; }
+  .event .connector.dotted::before { content: "\250a"; color: var(--text-dim); }
+  .event .ts { color: var(--text-dim); white-space: nowrap; }
+  .event .action { color: var(--text); }
+  .event .reason { color: var(--text-dim); }
+  .empty { color: var(--text-dim); font-family: var(--mono); font-size: 13px; padding: 8px 0; }
+  .full { grid-column: 1 / -1; }
+</style>
+</head>
+<body>
+  <h1>NEXUS — operator view</h1>
+
+  <div class="banner" id="banner">
+    <span class="ts" id="banner-ts">loading...</span>
+    <span id="banner-text">Connecting...</span>
+  </div>
+
+  <div class="grid">
+    <div class="card">
+      <h2>Backlog</h2>
+      <div class="stat-row"><span class="k">Pending</span><span id="stat-pending">-</span></div>
+      <div class="stat-row"><span class="k">Oldest item age</span><span id="stat-oldest">-</span></div>
+      <div class="stat-row"><span class="k">Dead-lettered</span><span id="stat-dl-count">-</span></div>
+    </div>
+
+    <div class="card">
+      <h2>Workers</h2>
+      <table>
+        <thead><tr><th>Worker</th><th>Restarts</th><th>Last healthy</th></tr></thead>
+        <tbody id="workers-body"></tbody>
+      </table>
+    </div>
+
+    <div class="card full">
+      <h2>Dead-lettered items</h2>
+      <table>
+        <thead><tr><th>ID</th><th>Type</th><th>Reason</th><th>Since</th></tr></thead>
+        <tbody id="dl-body"></tbody>
+      </table>
+    </div>
+
+    <div class="card full">
+      <h2>Recent events</h2>
+      <div class="events" id="events-list"></div>
+    </div>
+  </div>
+
+<script>
+function timeAgo(iso) {
+  const s = Math.max(0, Math.floor((Date.now() - new Date(iso).getTime()) / 1000));
+  if (s < 60) return s + 's ago';
+  if (s < 3600) return Math.floor(s / 60) + 'm ago';
+  return Math.floor(s / 3600) + 'h ago';
+}
+
+function render(status) {
+  const banner = document.getElementById('banner');
+  const sev = (status.diagnosis && status.diagnosis.severity) || 'ok';
+  banner.className = 'banner ' + sev;
+  document.getElementById('banner-ts').textContent = new Date().toLocaleTimeString();
+  document.getElementById('banner-text').textContent =
+    (status.diagnosis && status.diagnosis.text) || 'All systems normal.';
+
+  document.getElementById('stat-pending').textContent = status.backlog.pending;
+  document.getElementById('stat-oldest').textContent =
+    status.backlog.oldest_age_seconds != null ? status.backlog.oldest_age_seconds + 's' : '-';
+  document.getElementById('stat-dl-count').textContent = status.backlog.dead_letter_count;
+
+  const wBody = document.getElementById('workers-body');
+  wBody.innerHTML = (status.workers || []).map(w => `
+    <tr>
+      <td><span class="dot ${w.status}"></span>${w.id}</td>
+      <td>${w.restart_count}</td>
+      <td>${w.last_healthy_at ? timeAgo(w.last_healthy_at) : '-'}</td>
+    </tr>`).join('') || '<tr><td class="empty" colspan="3">No workers reporting</td></tr>';
+
+  const dlBody = document.getElementById('dl-body');
+  dlBody.innerHTML = (status.dead_letters || []).map(d => `
+    <tr>
+      <td>${d.id}</td>
+      <td>${d.type}</td>
+      <td>${d.reason}</td>
+      <td>${timeAgo(d.since)}</td>
+    </tr>`).join('') || '<tr><td class="empty" colspan="4">None</td></tr>';
+
+  const evList = document.getElementById('events-list');
+  evList.innerHTML = (status.recent_events || []).map(e => `
+    <div class="event">
+      <span class="connector ${e.caused_by_event_id ? 'solid' : 'dotted'}"></span>
+      <span class="ts">${new Date(e.ts).toLocaleTimeString()}</span>
+      <span class="action">${e.entity_type}/${e.entity_id} \u2192 ${e.action}</span>
+      ${e.reason ? `<span class="reason">(${e.reason})</span>` : ''}
+    </div>`).join('') || '<div class="empty">No recent events</div>';
+}
+
+async function poll() {
+  try {
+    const res = await fetch('/status');
+    const data = await res.json();
+    render(data);
+  } catch (e) {
+    document.getElementById('banner-text').textContent = 'Cannot reach platform - is it running?';
+    document.getElementById('banner').className = 'banner critical';
+  }
+}
+
+poll();
+setInterval(poll, 1500);
+</script>
+</body>
+</html>
