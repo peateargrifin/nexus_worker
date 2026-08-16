@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"nexus/internal/chaos"
 	"nexus/internal/store"
 	"time"
 )
@@ -69,11 +70,13 @@ func handleGetDiagnosis(w http.ResponseWriter, r *http.Request) {
 }
 
 type DashboardStatus struct {
-	Diagnosis    *DiagnosisInfo     `json:"diagnosis"`
-	Backlog      BacklogInfo        `json:"backlog"`
-	Workers      []WorkerInfo       `json:"workers"`
-	DeadLetters  []DeadLetterInfo   `json:"dead_letters"`
-	RecentEvents []store.Event      `json:"recent_events"`
+	Diagnosis      *DiagnosisInfo     `json:"diagnosis"`
+	PlatformHealthy bool              `json:"platform_healthy"`
+	Backlog        BacklogInfo        `json:"backlog"`
+	Workers        []WorkerInfo       `json:"workers"`
+	DeadLetters    []DeadLetterInfo   `json:"dead_letters"`
+	RecentEvents   []store.Event      `json:"recent_events"`
+	ActiveRelease  *store.Release     `json:"active_release"`
 }
 
 type DiagnosisInfo struct {
@@ -104,10 +107,14 @@ type DeadLetterInfo struct {
 
 func handleGetStatus(w http.ResponseWriter, r *http.Request) {
 	status := DashboardStatus{
-		Workers:      []WorkerInfo{},
-		DeadLetters:  []DeadLetterInfo{},
-		RecentEvents: []store.Event{},
+		PlatformHealthy: !chaos.DependencyDown,
+		Workers:         []WorkerInfo{},
+		DeadLetters:     []DeadLetterInfo{},
+		RecentEvents:    []store.Event{},
 	}
+
+	rel, _ := store.GetActiveRelease()
+	status.ActiveRelease = rel
 
 	// 1. Backlog
 	_ = store.DB.QueryRow("SELECT COUNT(*) FROM work_items WHERE status = 'pending'").Scan(&status.Backlog.Pending)
