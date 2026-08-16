@@ -187,13 +187,33 @@ function render(data) {
     ph.innerHTML = '🔴 DEGRADED <span style="font-size:12px; font-weight:normal; margin-left:8px;">(dependency offline)</span>';
   }
 
-  // Incident Box
   const inc = document.getElementById('incident-container');
   if (data.diagnosis && data.diagnosis.text && data.diagnosis.text.indexOf('No anomalous') === -1) {
+    let relatedHTML = '';
+    if (data.diagnosis.related_release_id) {
+      relatedHTML = `
+        <div style="margin-top: 16px; padding-top: 12px;">
+          <div style="font-size: 12px; color: var(--text-dim); margin-bottom: 8px;">Likely related change</div>
+          <div style="display: flex; justify-content: space-between; align-items: center; border: 1px solid var(--border); padding: 8px 12px; border-radius: 4px; background: var(--bg);">
+            <div style="font-family: var(--mono); font-size: 13px; color: var(--text);">Release ${data.diagnosis.related_release_id}</div>
+            <div>
+              <button style="margin: 0; margin-right: 8px;" onclick="alert('View release details')">View release</button>
+              <button class="btn-danger" style="margin: 0;" onclick="post('/releases/${data.diagnosis.related_release_id}/rollback')">ROLLBACK</button>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    // In DashboardStatus, Since is formatted as 15:04:05, but timeAgo expects ISO.
+    // The previous implementation used "Started 2m ago" but data.diagnosis.since is "10:15:00".
+    // We can just say "Started at " + data.diagnosis.since
     inc.innerHTML = `
       <div class="incident-box">
-        <h2>🔴 ACTIVE INCIDENT</h2>
-        <p>${data.diagnosis.text}</p>
+        <h2>🔴 INCIDENT / DIAGNOSIS</h2>
+        <div style="color: var(--text); font-family: var(--sans); font-size: 15px; font-weight: 500;">Worker ${data.diagnosis.worker_id} is ${data.diagnosis.action}</div>
+        <div style="color: var(--text-dim); font-size: 13px; margin-top: 4px;">Started at ${data.diagnosis.since}</div>
+        ${relatedHTML}
       </div>
     `;
   } else {
@@ -258,7 +278,10 @@ function render(data) {
 
   // Timeline
   const tl = document.getElementById('timeline');
-  tl.innerHTML = (data.recent_events || []).map(e => {
+  let timelineHTML = '';
+  const events = data.recent_events || [];
+  for (let i = 0; i < events.length; i++) {
+    const e = events[i];
     let desc = `${e.entity_type} ${e.entity_id} \u2192 ${e.action}`;
     if (e.entity_type === 'release' && e.action === 'pushed') desc = `RELEASE ${e.entity_id}`;
     if (e.entity_type === 'worker' && e.action === 'killed') desc = `${e.entity_id} crashed`;
@@ -267,14 +290,21 @@ function render(data) {
     let why = '';
     if (e.reason) why = `<div class="why">Why: ${e.reason}</div>`;
     
-    return `
+    timelineHTML += `
       <div class="timeline-event">
         <span class="ts">${tOnly(e.ts)}</span>
         <span class="desc">${desc}</span>
       </div>
       ${why}
     `;
-  }).join('') || '<div style="color:var(--text-dim);">No recent events</div>';
+
+    if (i < events.length - 1) {
+      let isSolid = (e.caused_by_event_id != null);
+      let lineChar = isSolid ? '│' : '⋮';
+      timelineHTML += `<div style="margin-left: 20px; color: var(--text-dim); font-size: 14px; margin-bottom: 4px;">${lineChar}</div>`;
+    }
+  }
+  tl.innerHTML = timelineHTML || '<div style="color:var(--text-dim);">No recent events</div>';
 
   // Cache Drift
   const drift = (data.recent_events || []).find(e => e.entity_type === 'cache' && e.action === 'disagreement');
@@ -282,9 +312,9 @@ function render(data) {
   if (drift) {
     cb.style.display = 'block';
     document.getElementById('cache-info').innerHTML = `
-      <div style="color:var(--text);">${drift.entity_id}</div>
-      <div style="color:var(--text-dim); font-size:12px; margin-top:4px;">${drift.reason}</div>
-      <div style="color:var(--text-dim); font-size:12px; margin-top:8px;">Occurred: ${timeAgo(drift.ts)} ago</div>
+      <div style="color:var(--text); font-family: var(--mono);">${drift.entity_id} <span style="color:var(--warn); font-size:12px; margin-left:8px; font-family:var(--sans);">⚠ DRIFT</span></div>
+      <div style="color:var(--text-dim); font-size:12px; margin-top:8px;">${drift.reason}</div>
+      <div style="color:var(--crit); font-size:12px; margin-top:8px;">Cached value will not be served.</div>
     `;
   } else {
     cb.style.display = 'none';

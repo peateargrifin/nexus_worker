@@ -10,7 +10,7 @@ import (
 	"time"
 )
 
-func GetDiagnosisString() string {
+func GetDiagnosis() *DiagnosisInfo {
 	var anomaly store.Event
 	err := store.DB.QueryRow(`
 		SELECT id, ts, entity_type, entity_id, action, reason 
@@ -21,7 +21,7 @@ func GetDiagnosisString() string {
 	`).Scan(&anomaly.ID, &anomaly.Ts, &anomaly.EntityType, &anomaly.EntityID, &anomaly.Action, &anomaly.Reason)
 
 	if err != nil {
-		return ""
+		return nil
 	}
 
 	var rel store.Event
@@ -41,33 +41,33 @@ func GetDiagnosisString() string {
 		actionStr = "crash-looping"
 	}
 
-	if err != nil {
-		return fmt.Sprintf("Worker %s has been %s since %s. No recent release found.",
-			anomaly.EntityID,
-			actionStr,
-			anomaly.Ts.Local().Format("15:04:05"),
-		)
+	info := &DiagnosisInfo{
+		Severity: "critical",
+		WorkerID: anomaly.EntityID,
+		Action:   actionStr,
+		Since:    anomaly.Ts.Local().Format("15:04:05"),
 	}
 
-	return fmt.Sprintf("Worker %s has been %s since %s, %d seconds after release %s went out.",
-		anomaly.EntityID,
-		actionStr,
-		anomaly.Ts.Local().Format("15:04:05"),
-		int(anomaly.Ts.Sub(rel.Ts).Seconds()),
-		rel.EntityID,
-	)
+	if err == nil {
+		info.RelatedReleaseID = rel.EntityID
+		info.Text = fmt.Sprintf("Worker %s has been %s since %s, %d seconds after release %s went out.",
+			anomaly.EntityID, actionStr, info.Since, int(anomaly.Ts.Sub(rel.Ts).Seconds()), rel.EntityID)
+	} else {
+		info.Text = fmt.Sprintf("Worker %s has been %s since %s. No recent release found.",
+			anomaly.EntityID, actionStr, info.Since)
+	}
+
+	return info
 }
 
 func handleGetDiagnosis(w http.ResponseWriter, r *http.Request) {
-	diag := GetDiagnosisString()
-	if diag == "" {
-		diag = "No anomalous worker behavior detected recently."
-	}
-	
+	diag := GetDiagnosis()
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{
-		"diagnosis": diag,
-	})
+	if diag == nil {
+		json.NewEncoder(w).Encode(map[string]string{"diagnosis": "No anomalous worker behavior detected recently."})
+	} else {
+		json.NewEncoder(w).Encode(diag)
+	}
 }
 
 type DashboardStatus struct {
@@ -81,8 +81,12 @@ type DashboardStatus struct {
 }
 
 type DiagnosisInfo struct {
-	Text     string `json:"text"`
-	Severity string `json:"severity"`
+	Text             string `json:"text"`
+	Severity         string `json:"severity"`
+	WorkerID         string `json:"worker_id"`
+	Action           string `json:"action"`
+	Since            string `json:"since"`
+	RelatedReleaseID string `json:"related_release_id"`
 }
 
 type BacklogInfo struct {
@@ -163,9 +167,9 @@ func handleGetStatus(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 5. Diagnosis
-	diag := GetDiagnosisString()
-	if diag != "" {
-		status.Diagnosis = &DiagnosisInfo{Text: diag, Severity: "critical"}
+	diag := GetDiagnosis()
+	if diag != nil {
+		status.Diagnosis = diag
 	} else if status.Backlog.DeadLetterCount > 0 {
 		status.Diagnosis = &DiagnosisInfo{Text: "Some items are dead-lettered.", Severity: "warning"}
 	}
