@@ -48,6 +48,16 @@ func RollbackRelease(id string) (*Release, error) {
 		return nil, err
 	}
 
+	// Insert a synthetic release record to establish previous_version as the active pointer
+	_, err = tx.Exec(`
+		INSERT INTO releases (id, version, previous_version, status, started_at, watch_until)
+		VALUES (?, ?, ?, 'committed', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+	`, "rb-"+r.ID, r.PreviousVersion, r.Version)
+	
+	if err != nil {
+		return nil, err
+	}
+
 	if err := tx.Commit(); err != nil {
 		return nil, err
 	}

@@ -26,7 +26,7 @@ func StartReconciler(ctx context.Context) {
 				SELECT c.key, c.value, w.status, c.cached_at, w.updated_at
 				FROM cache_entries c 
 				JOIN work_items w ON c.key = w.id 
-				WHERE c.value != w.status OR w.updated_at > datetime(c.cached_at, '+60 seconds')
+				WHERE c.value != w.status OR w.updated_at > datetime(c.cached_at, '+' || c.max_age_seconds || ' seconds')
 			`)
 			if err != nil {
 				log.Printf("Reconciler error querying mismatches: %v", err)

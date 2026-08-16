@@ -55,6 +55,7 @@ CREATE TABLE IF NOT EXISTS cache_entries (
 `
 	_, err := DB.Exec(schema)
 	if err == nil {
+		// Ignore error if column already exists (for dirty test DBs)
 		DB.Exec("ALTER TABLE workers ADD COLUMN version TEXT NOT NULL DEFAULT 'v1.0'")
 	}
 	return err
